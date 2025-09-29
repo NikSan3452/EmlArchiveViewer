@@ -1,0 +1,55 @@
+@using Variant = MudBlazor.Variant
+
+@if (Message != null)
+{
+    <MudCard Style="@($"{Style} display: flex; flex-direction: column;")">
+        <MudCardHeader>
+            <CardHeaderContent>
+                <MudText Typo="Typo.h6">@Message.Subject</MudText>
+                <MudText Typo="Typo.body2">От: @Message.From</MudText>
+                <MudText Typo="Typo.body2">Кому: @Message.To</MudText>
+                @if (!string.IsNullOrEmpty(Message.Cc))
+                {
+                    <MudText Typo="Typo.body2">Копия: @Message.Cc</MudText>
+                }
+                <MudText Typo="Typo.caption">@Message.Date.ToString("f")</MudText>
+            </CardHeaderContent>
+        </MudCardHeader>
+
+        @if (Message.HasAttachments)
+        {
+            <MudCardActions>
+                <MudText Typo="Typo.subtitle2">Вложения:</MudText>
+                @foreach (var attachment in Message.Attachments)
+                {
+                    <MudButton OnClick="@(() => OnDownloadAttachment.InvokeAsync(attachment))"
+                               Variant="Variant.Text"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.CloudDownload">
+                        @attachment.FileName
+                    </MudButton>
+                }
+            </MudCardActions>
+        }
+
+        <MudCardContent Style="flex-grow: 1; overflow: auto;">
+            @if (!string.IsNullOrEmpty(Message.HtmlBody))
+            {
+                <iframe style="width:100%; height: 100%; border: 1px solid #ccc;" srcdoc="@Message.HtmlBody"></iframe>
+            }
+            else
+            {
+                <pre>@Message.TextBody</pre>
+            }
+        </MudCardContent>
+
+    </MudCard>
+}
+
+@code {
+    [Parameter] public EmailMessage? Message { get; set; }
+
+    [Parameter] public EventCallback<EmailAttachment> OnDownloadAttachment { get; set; }
+
+    [Parameter] public string? Style { get; set; }
+}

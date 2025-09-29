@@ -1,0 +1,118 @@
+﻿@page "/"
+
+@using Variant = MudBlazor.Variant
+@inject EmlArchiveService ArchiveService
+@inject ViewerStateService ViewerStateService
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject ILocalStorageService LocalStorage
+
+<PageTitle>Загрузка архива</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Small" Class="mt-16">
+    <MudPaper Class="pa-8">
+        <MudStack Spacing="4">
+            <MudText Typo="Typo.h5" Align="Align.Center">Просмотр EML архива</MudText>
+
+            <MudTextField @bind-Value="_archivePath"
+                          Label="Путь к архиву"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Required="true"/>
+
+            <MudTextField @bind-Value="_userEmail"
+                          Label="Ваш Email адрес"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Required="true"/>
+
+            @if (_isLoading)
+            {
+                <MudProgressLinear Color="Color.Primary" Value="_progressValue" Class="my-2"/>
+                <MudText Align="Align.Center">@_progressStatus</MudText>
+            }
+
+            <MudButton OnClick="@(() => LoadArchiveAsync())"
+                       Disabled="@(string.IsNullOrWhiteSpace(_userEmail) || string.IsNullOrWhiteSpace(_archivePath) || _isLoading)"
+                       Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       FullWidth="true"
+                       Size="Size.Large"
+                       Class="mt-4">
+                @(_isLoading ? "Загрузка..." : "Загрузить")
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string _archivePath = "D:\\Downloads";
+    private string _userEmail = string.Empty;
+
+    private bool _isLoading;
+    private double _progressValue;
+    private string _progressStatus = string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _userEmail = await LocalStorage.GetItemAsync<string>("userEmail") ?? string.Empty;
+            _archivePath = await LocalStorage.GetItemAsync<string>("archivePath") ?? "D:\\Downloads";
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadArchiveAsync()
+    {
+        _isLoading = true;
+        _progressValue = 0;
+        _progressStatus = "Подготовка...";
+        StateHasChanged();
+
+        try
+        {
+            await LocalStorage.SetItemAsync("userEmail", _userEmail);
+            await LocalStorage.SetItemAsync("archivePath", _archivePath);
+
+            var messages = new List<EmailMessage>();
+
+            await Task.Run(async () =>
+            {
+                messages = await ArchiveService.ScanDirectoryAndGetMessagesAsync(_archivePath, _userEmail, (processed, total) =>
+                {
+                    _progressValue = total > 0 ? (double)processed / total * 100 : 0;
+                    _progressStatus = $"Обработано файлов: {processed} из {total}";
+                    InvokeAsync(StateHasChanged);
+                });
+            });
+
+            if (!messages.Any())
+            {
+                Snackbar.Add("В указанной директории не найдено .eml файлов.", Severity.Warning);
+                return;
+            }
+
+            ViewerStateService.AllMessages = messages;
+            ViewerStateService.UserEmail = _userEmail;
+
+            var userName = _userEmail.Split('@').FirstOrDefault() ?? "default";
+
+            NavigationManager.NavigateTo($"/{userName}/emails");
+        }
+        catch (DirectoryNotFoundException)
+        {
+            Snackbar.Add("Ошибка: Указанная директория не найдена.", Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Произошла непредвиденная ошибка: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+}

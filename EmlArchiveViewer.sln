@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36310.24 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EmlArchiveViewer", "EmlArchiveViewer\EmlArchiveViewer.csproj", "{0CD13A7F-1CE4-4786-B103-9A4D6E62AEDC}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0CD13A7F-1CE4-4786-B103-9A4D6E62AEDC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0CD13A7F-1CE4-4786-B103-9A4D6E62AEDC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0CD13A7F-1CE4-4786-B103-9A4D6E62AEDC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0CD13A7F-1CE4-4786-B103-9A4D6E62AEDC}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E58F82F2-AAF0-43B8-9E0C-545ACC17B986}
+	EndGlobalSection
+EndGlobal
