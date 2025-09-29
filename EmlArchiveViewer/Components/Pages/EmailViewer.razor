@@ -1,5 +1,6 @@
 @page "/{User}/emails"
 @using SortDirection = MudBlazor.SortDirection
+@using Variant = MudBlazor.Variant
 @inject ViewerStateService ViewerStateService
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
@@ -23,10 +24,25 @@
 
                 <RadzenSplitterPane Size="40%" Min="300px">
                     <MudPaper Elevation="0" Style="height: 100%; padding: 10px; box-sizing: border-box;">
-                        <MudText Class="pb-2" Typo="Typo.subtitle2">Всего писем: @_allMessages.Count</MudText>
+
+                        <div class="d-flex align-center pb-2" style="width: 100%;">
+                            <MudText Typo="Typo.subtitle2">Всего писем: @_allMessages.Count</MudText>
+                            <MudTextField
+                                @bind-Value="_searchText"
+                                Placeholder="Поиск..."
+                                Variant="Variant.Outlined"
+                                Margin="Margin.Dense"
+                                Adornment="Adornment.Start"
+                                AdornmentIcon="@Icons.Material.Filled.Search"
+                                IconSize="Size.Small"
+                                Immediate="true"
+                                Clearable="true"
+                                Style="max-width: 300px; margin-left: auto;" />
+                        </div>
+                        
                         <MudTable Items="CurrentMessages"
                                   FixedHeader="true"
-                                  Height="90vh"
+                                  Height="88vh"
                                   Dense="true"
                                   Hover="true"
                                   @bind-SelectedItem="_selectedMessage" Breakpoint="Breakpoint.None"
@@ -92,6 +108,8 @@ else
     private EmailMessage? _selectedMessage;
     private MailboxType _selectedMailbox = MailboxType.Inbox;
 
+    private string _searchText = string.Empty;
+
     protected override void OnInitialized()
     {
         _allMessages = ViewerStateService.AllMessages;
@@ -108,7 +126,7 @@ else
         {
             return _allMessages
                 .Where(m => m.Mailbox == _selectedMailbox)
-                .OrderByDescending(m => m.Date);
+                .Where(Filter(_searchText));
         }
     }
 
@@ -117,6 +135,37 @@ else
         var fileStream = new MemoryStream(attachment.Content);
         using var streamRef = new DotNetStreamReference(fileStream);
         await JsRuntime.InvokeVoidAsync("downloadFileFromStream", attachment.FileName, streamRef);
+    }
+
+    private static string? NormalizeCyrillic(string? input)
+    {
+        return string.IsNullOrEmpty(input)
+            ? input
+            : input.Replace("ё", "е").Replace("Ё", "Е").Replace("й", "и").Replace("Й", "И");
+    }
+
+    private static Func<EmailMessage, bool> Filter(string? searchString)
+    {
+        return message =>
+        {
+            if (string.IsNullOrWhiteSpace(searchString))
+                return true;
+
+            var normalizedSearch = NormalizeCyrillic(searchString.Trim());
+            var searchTerms = normalizedSearch?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (searchTerms == null || searchTerms.Length == 0)
+                return true;
+
+            return searchTerms.All(term =>
+                (NormalizeCyrillic(message.From)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (NormalizeCyrillic(message.To)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (NormalizeCyrillic(message.Subject)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (NormalizeCyrillic(message.TextBody)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (NormalizeCyrillic(message.HtmlBody)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (NormalizeCyrillic(message.Date.ToString("dd.MM.yyyy HH:mm"))?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            );
+        };
     }
 
 }
