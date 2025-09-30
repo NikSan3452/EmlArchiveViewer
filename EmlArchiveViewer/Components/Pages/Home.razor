@@ -19,13 +19,6 @@
                           Variant="Variant.Outlined"
                           Margin="Margin.Dense"
                           Required="true"/>
-
-            <MudTextField @bind-Value="_userEmail"
-                          Label="Ваш Email адрес"
-                          Variant="Variant.Outlined"
-                          Margin="Margin.Dense"
-                          Required="true"/>
-
             @if (_isLoading)
             {
                 <MudProgressLinear Color="Color.Primary" Value="_progressValue" Class="my-2"/>
@@ -33,7 +26,7 @@
             }
 
             <MudButton OnClick="@(() => LoadArchiveAsync())"
-                       Disabled="@(string.IsNullOrWhiteSpace(_userEmail) || string.IsNullOrWhiteSpace(_archivePath) || _isLoading)"
+                       Disabled="@(string.IsNullOrWhiteSpace(_archivePath) || _isLoading)"
                        Variant="Variant.Filled"
                        Color="Color.Primary"
                        FullWidth="true"
@@ -47,8 +40,6 @@
 
 @code {
     private string _archivePath = "D:\\Downloads";
-    private string _userEmail = string.Empty;
-
     private bool _isLoading;
     private double _progressValue;
     private string _progressStatus = string.Empty;
@@ -57,9 +48,7 @@
     {
         if (firstRender)
         {
-            _userEmail = await LocalStorage.GetItemAsync<string>("userEmail") ?? string.Empty;
             _archivePath = await LocalStorage.GetItemAsync<string>("archivePath") ?? "D:\\Downloads";
-
             await InvokeAsync(StateHasChanged);
         }
     }
@@ -73,33 +62,54 @@
 
         try
         {
-            await LocalStorage.SetItemAsync("userEmail", _userEmail);
             await LocalStorage.SetItemAsync("archivePath", _archivePath);
 
-            var headers = new List<EmailHeader>();
+            List<EmailHeader> finalHeaders = [];
+            var detectedUserEmail = string.Empty;
 
             await Task.Run(async () =>
             {
-                headers = await ArchiveService.ScanDirectoryAndGetHeadersAsync(_archivePath, _userEmail, (processed, total) =>
+                var preliminaryHeaders = await ArchiveService.ScanDirectoryAndGetPreliminaryHeadersAsync(_archivePath, (processed, total) =>
                 {
-                    _progressValue = total > 0 ? (double)processed / total * 100 : 0;
-                    _progressStatus = $"Обработано файлов: {processed} из {total}";
+                    _progressValue = total > 0 ? (double)processed / total * 50 : 0;
+                    _progressStatus = $"Сканирование файлов: {processed} из {total}";
                     InvokeAsync(StateHasChanged);
                 });
+
+                if (!preliminaryHeaders.Any()) return;
+
+                detectedUserEmail = preliminaryHeaders
+                    .Where(h => !string.IsNullOrEmpty(h.FromEmail))
+                    .GroupBy(h => h.FromEmail?.ToLowerInvariant())
+                    .OrderByDescending(g => g.Count())
+                    .Select(g => g.Key)
+                    .FirstOrDefault() ?? string.Empty;
+
+                for (var i = 0; i < preliminaryHeaders.Count; i++)
+                {
+                    var header = preliminaryHeaders[i];
+                    header.Mailbox = header.FromEmail?.Equals(detectedUserEmail, StringComparison.OrdinalIgnoreCase) == true
+                        ? MailboxType.Sent
+                        : MailboxType.Inbox;
+                    finalHeaders.Add(header);
+
+                    _progressValue = 50 + (double)(i + 1) / preliminaryHeaders.Count * 50;
+                    _progressStatus = $"Классификация писем: {i + 1} из {preliminaryHeaders.Count}";
+                    await InvokeAsync(StateHasChanged);
+                }
             });
 
-            if (!headers.Any())
+            if (!finalHeaders.Any())
             {
                 Snackbar.Add("В указанной директории не найдено .eml файлов.", Severity.Warning);
                 _isLoading = false;
                 return;
             }
 
-            ViewerStateService.AllHeaders = headers;
-            ViewerStateService.UserEmail = _userEmail;
+            ViewerStateService.AllHeaders = finalHeaders;
+            ViewerStateService.UserEmail = detectedUserEmail;
 
-            var userName = _userEmail.Split('@').FirstOrDefault() ?? "default";
-
+            var userName = detectedUserEmail.Split('@').FirstOrDefault() ?? "default";
             NavigationManager.NavigateTo($"/{userName}/emails");
         }
         catch (DirectoryNotFoundException)

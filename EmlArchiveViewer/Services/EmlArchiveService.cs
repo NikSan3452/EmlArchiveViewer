@@ -5,10 +5,9 @@ using EmlArchiveViewer.Models;
 namespace EmlArchiveViewer.Services;
 
 public class EmlArchiveService(EmlParserService parserService)
-{
-    public async Task<List<EmailHeader>> ScanDirectoryAndGetHeadersAsync(
+{ 
+    public async Task<List<EmailHeader>> ScanDirectoryAndGetPreliminaryHeadersAsync(
         string rootPath,
-        string userEmail,
         Action<int, int> onProgress,
         CancellationToken cancellationToken = default)
     {
@@ -19,15 +18,9 @@ public class EmlArchiveService(EmlParserService parserService)
         {
             allFiles = Directory.EnumerateFiles(rootPath, "*.eml", SearchOption.AllDirectories).ToList();
         }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or DirectoryNotFoundException)
         {
-            Debug.WriteLine($"Ошибка доступа к директории {rootPath}: {ex.Message}");
-            onProgress?.Invoke(0, 0);
-            return [];
-        }
-        catch (DirectoryNotFoundException ex)
-        {
-            Debug.WriteLine($"Директория не найдена {rootPath}: {ex.Message}");
+            Debug.WriteLine($"Ошибка доступа или директория не найдена {rootPath}: {ex.Message}");
             onProgress?.Invoke(0, 0);
             return [];
         }
@@ -43,9 +36,12 @@ public class EmlArchiveService(EmlParserService parserService)
 
         onProgress?.Invoke(processedFiles, totalFiles);
 
+        if (totalFiles == 0) return [];
+
         var parallelOptions = new ParallelOptions
         {
-            CancellationToken = cancellationToken
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Environment.ProcessorCount
         };
 
         try
@@ -56,7 +52,7 @@ public class EmlArchiveService(EmlParserService parserService)
                 {
                     token.ThrowIfCancellationRequested();
 
-                    var header = await parserService.ParseHeadersAsync(filePath, userEmail);
+                    var header = await parserService.ParseHeadersAsync(filePath);
                     headers.Add(header);
                 }
                 catch (OperationCanceledException)
