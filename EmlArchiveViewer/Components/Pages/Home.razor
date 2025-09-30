@@ -71,45 +71,17 @@
         _isLoading = true;
         _progressValue = 0;
         _progressStatus = "Подготовка...";
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
 
         try
         {
             await LocalStorage.SetItemAsync("archivePath", _archivePath);
 
-            List<EmailHeader> finalHeaders = [];
-            var detectedUserEmail = string.Empty;
-
-            await Task.Run(async () =>
+            var (finalHeaders, detectedUserEmail) = await ArchiveService.LoadArchiveAsync(_archivePath, (progress, status) =>
             {
-                var preliminaryHeaders = await ArchiveService.ScanDirectoryAndGetPreliminaryHeadersAsync(_archivePath, (processed, total) =>
-                {
-                    _progressValue = total > 0 ? (double)processed / total * 50 : 0;
-                    _progressStatus = $"Сканирование файлов: {processed} из {total}";
-                    InvokeAsync(StateHasChanged);
-                });
-
-                if (!preliminaryHeaders.Any()) return;
-
-                detectedUserEmail = preliminaryHeaders
-                    .Where(h => !string.IsNullOrEmpty(h.FromEmail))
-                    .GroupBy(h => h.FromEmail?.ToLowerInvariant())
-                    .OrderByDescending(g => g.Count())
-                    .Select(g => g.Key)
-                    .FirstOrDefault() ?? string.Empty;
-
-                for (var i = 0; i < preliminaryHeaders.Count; i++)
-                {
-                    var header = preliminaryHeaders[i];
-                    header.Mailbox = header.FromEmail?.Equals(detectedUserEmail, StringComparison.OrdinalIgnoreCase) == true
-                        ? MailboxType.Sent
-                        : MailboxType.Inbox;
-                    finalHeaders.Add(header);
-
-                    _progressValue = 50 + (double)(i + 1) / preliminaryHeaders.Count * 50;
-                    _progressStatus = $"Классификация писем: {i + 1} из {preliminaryHeaders.Count}";
-                    await InvokeAsync(StateHasChanged);
-                }
+                _progressValue = progress;
+                _progressStatus = status;
+                InvokeAsync(StateHasChanged);
             });
 
             if (!finalHeaders.Any())
@@ -123,7 +95,6 @@
             ViewerStateService.UserEmail = detectedUserEmail;
 
             var userName = detectedUserEmail.Split('@').FirstOrDefault() ?? "default";
-
             NavigationManager.NavigateTo($"/{userName}/emails");
         }
         catch (DirectoryNotFoundException)

@@ -1,10 +1,15 @@
 @page "/{User}/emails"
+
 @using SortDirection = MudBlazor.SortDirection
 @using Variant = MudBlazor.Variant
 @inject ViewerStateService ViewerStateService
-@inject EmlParserService EmlParserService
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
+@inject ISnackbar Snackbar
+@inject EmlArchiveService ArchiveService
+@inject ILocalStorageService LocalStorage
+@inject IDialogService DialogService
+@inject EmlParserService EmlParserService
 
 <PageTitle>Письма - @User</PageTitle>
 
@@ -46,11 +51,14 @@
 
                         <MudTable @ref="_table"
                                   ServerData="ServerReload"
+                                  SelectOnRowClick="false"
                                   FixedHeader="true"
                                   Height="calc(82vh - 4px)"
                                   Dense="true"
                                   Hover="true"
-                                  @bind-SelectedItem="SelectedHeader"
+                                  MultiSelection="true"
+                                  @bind-SelectedItems="_selectedHeaders"
+                                  OnRowClick="@((TableRowClickEventArgs<EmailHeader> args) => OnRowClickHandler(args))"
                                   Breakpoint="Breakpoint.None"
                                   Style="cursor: pointer;">
                             <HeaderContent>
@@ -69,12 +77,49 @@
                                 </MudTh>
                             </HeaderContent>
                             <RowTemplate>
-                                <MudTd DataLabel="Отправитель" style="font-size: 12px;">@context.From</MudTd>
-                                <MudTd DataLabel="Тема" style="font-size: 12px;">@context.Subject</MudTd>
-                                <MudTd DataLabel="Дата"
-                                       style="font-size: 12px; width: 130px">@context.Date.ToString("g")</MudTd>
+                                <MudTd Style="padding: 0; font-size: 12px;">
+                                    <MudMenu ActivationEvent="@MouseEvent.RightClick" PositionAtCursor="true">
+                                        <ActivatorContent>
+                                            <div style="padding: 6px 16px; width: 100%; height: 100%;">
+                                                @context.From
+                                            </div>
+                                        </ActivatorContent>
+                                        <ChildContent>
+                                            <MudMenuItem OnClick="@(() => DeleteSelectedEmails())"
+                                                         Disabled="@(!_selectedHeaders.Any())">Удалить
+                                            </MudMenuItem>
+                                        </ChildContent>
+                                    </MudMenu>
+                                </MudTd>
+                                <MudTd Style="padding: 0; font-size: 12px;">
+                                    <MudMenu ActivationEvent="@MouseEvent.RightClick" PositionAtCursor="true">
+                                        <ActivatorContent>
+                                            <div style="padding: 6px 16px; width: 100%; height: 100%;">
+                                                @context.Subject
+                                            </div>
+                                        </ActivatorContent>
+                                        <ChildContent>
+                                            <MudMenuItem OnClick="@(() => DeleteSelectedEmails())"
+                                                         Disabled="@(!_selectedHeaders.Any())">Удалить
+                                            </MudMenuItem>
+                                        </ChildContent>
+                                    </MudMenu>
+                                </MudTd>
+                                <MudTd Style="padding: 0; font-size: 12px; width: 130px;">
+                                    <MudMenu ActivationEvent="@MouseEvent.RightClick" PositionAtCursor="true">
+                                        <ActivatorContent>
+                                            <div style="padding: 6px 16px; width: 100%; height: 100%;">
+                                                @context.Date.ToString("g")
+                                            </div>
+                                        </ActivatorContent>
+                                        <ChildContent>
+                                            <MudMenuItem OnClick="@(() => DeleteSelectedEmails())"
+                                                         Disabled="@(!_selectedHeaders.Any())">Удалить
+                                            </MudMenuItem>
+                                        </ChildContent>
+                                    </MudMenu>
+                                </MudTd>
                             </RowTemplate>
-
                             <PagerContent>
                                 <MudTablePager PageSizeOptions="PageSizeOptions"/>
                             </PagerContent>
@@ -103,7 +148,8 @@
 }
 else
 {
-    <MudText Align="Align.Center" Class="mt-16">Нет данных для отображения.
+    <MudText Align="Align.Center" Class="mt-16">
+        Нет данных для отображения.
         <MudLink Href="/">Вернуться на главную</MudLink>
     </MudText>
 }
@@ -112,17 +158,16 @@ else
     [Parameter] public string User { get; set; } = string.Empty;
 
     private MudTable<EmailHeader>? _table;
-
     private List<EmailHeader> _allHeaders = [];
     private string _searchText = string.Empty;
     private bool _isMessageLoading;
     private bool _isSwitchingMailbox;
-    private bool IsLoading => _isMessageLoading || _isSwitchingMailbox;
+    private bool _isDeleting;
+    private bool IsLoading => _isMessageLoading || _isSwitchingMailbox || _isDeleting;
     private EmailMessage? _selectedMessage;
-    private EmailHeader? _selectedHeader;
+    private HashSet<EmailHeader> _selectedHeaders = [];
+    private int[] PageSizeOptions { get; } = [50, 100, 300, 500];
 
-    private int[] PageSizeOptions { get; set; } = [50, 100, 300, 500];
-    
     private string SearchText
     {
         get => _searchText;
@@ -131,17 +176,6 @@ else
             if (_searchText == value) return;
             _searchText = value;
             _table?.ReloadServerData();
-        }
-    }
-
-    public EmailHeader? SelectedHeader
-    {
-        get => _selectedHeader;
-        set
-        {
-            if (_selectedHeader == value) return;
-            _selectedHeader = value;
-            _ = LoadFullMessageAsync(value);
         }
     }
 
@@ -162,6 +196,63 @@ else
         }
     }
 
+    private void OnRowClickHandler(TableRowClickEventArgs<EmailHeader> args)
+    {
+        _ = LoadFullMessageAsync(args.Item);
+    }
+
+    private async Task DeleteSelectedEmails()
+    {
+        if (!_selectedHeaders.Any())
+            return;
+
+        var confirmationResult = await DialogService.ShowMessageBox(
+            "Подтверждение удаления",
+            new MarkupString($"Вы уверены, что хотите безвозвратно удалить выбранные письма ({_selectedHeaders.Count} шт.)?"),
+            "Да", cancelText: "Нет");
+
+        if (confirmationResult != true)
+        {
+            return;
+        }
+
+        var filePathsToDelete = _selectedHeaders.Select(h => h.FilePath).ToList();
+        _isDeleting = true;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await ArchiveService.DeleteFilesAsync(filePathsToDelete);
+            Snackbar.Add($"Удалено файлов: {filePathsToDelete.Count}", Severity.Success);
+
+            var archivePath = await LocalStorage.GetItemAsync<string>("archivePath");
+            if (string.IsNullOrEmpty(archivePath))
+            {
+                Snackbar.Add("Критическая ошибка: не удалось найти путь к архиву для обновления.", Severity.Error);
+                NavigationManager.NavigateTo("/");
+                return;
+            }
+
+            var (reloadedHeaders, detectedEmail) = await ArchiveService.LoadArchiveAsync(archivePath, (_, _) => { });
+
+            ViewerStateService.AllHeaders = reloadedHeaders;
+            ViewerStateService.UserEmail = detectedEmail;
+            _allHeaders = reloadedHeaders;
+            _selectedHeaders.Clear();
+            _selectedMessage = null;
+
+            if (_table != null) await _table.ReloadServerData();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Ошибка при удалении и обновлении: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isDeleting = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
     private async Task LoadFullMessageAsync(EmailHeader? header)
     {
         if (header == null)
@@ -171,44 +262,22 @@ else
             return;
         }
 
-        _isMessageLoading = false;
-        _selectedMessage = null;
+        _isMessageLoading = true;
         await InvokeAsync(StateHasChanged);
-
-        var loadingTask = EmlParserService.ParseFullMessageAsync(header.FilePath, ViewerStateService.UserEmail);
-
-        var delayTask = Task.Delay(1000);
-
-        var completedTask = await Task.WhenAny(loadingTask, delayTask);
-
-        if (completedTask == loadingTask)
-        {
-            _selectedMessage = await loadingTask;
-        }
-        else
-        {
-            _isMessageLoading = true;
-            await InvokeAsync(StateHasChanged);
-
-            _selectedMessage = await loadingTask;
-
-            _isMessageLoading = false;
-        }
-
+        _selectedMessage = await EmlParserService.ParseFullMessageAsync(header.FilePath, ViewerStateService.UserEmail);
+        _isMessageLoading = false;
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task SetSelectedMailboxAsync(MailboxType mailbox)
     {
         if (_selectedMailbox == mailbox) return;
-
         _isSwitchingMailbox = true;
-        SelectedHeader = null;
+        _selectedHeaders.Clear();
+        _selectedMessage = null;
         _selectedMailbox = mailbox;
-
         if (_table != null) await _table.ReloadServerData();
         await InvokeAsync(StateHasChanged);
-
         _isSwitchingMailbox = false;
         await InvokeAsync(StateHasChanged);
     }
@@ -216,29 +285,23 @@ else
     private Task<TableData<EmailHeader>> ServerReload(TableState state, CancellationToken token)
     {
         var data = CurrentHeaders;
-
         data = state.SortLabel switch
         {
             "Отправитель" => data.OrderByDirection(state.SortDirection, h => h.From),
             "Тема" => data.OrderByDirection(state.SortDirection, h => h.Subject),
             _ => data.OrderByDirection(state.SortDirection, h => h.Date)
         };
-
         var emailHeaders = data as EmailHeader[] ?? data.ToArray();
         var totalItems = emailHeaders.Count();
-
         var pagedData = emailHeaders.Skip(state.Page * state.PageSize).Take(state.PageSize).ToList();
-
         return Task.FromResult(new TableData<EmailHeader> { TotalItems = totalItems, Items = pagedData });
     }
-
 
     private IEnumerable<EmailHeader> CurrentHeaders
     {
         get
         {
             var headersByMailbox = _allHeaders.Where(h => h.Mailbox == _selectedMailbox);
-
             if (string.IsNullOrWhiteSpace(_searchText))
             {
                 return headersByMailbox;
@@ -246,7 +309,6 @@ else
 
             var normalizedSearch = NormalizeCyrillic(_searchText.Trim());
             var searchTerms = normalizedSearch?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
             if (searchTerms == null || searchTerms.Length == 0)
             {
                 return headersByMailbox;
