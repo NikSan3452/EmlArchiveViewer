@@ -31,7 +31,8 @@
                     <MudPaper Elevation="0" Style="height: 100%; padding: 10px; box-sizing: border-box;">
                         <div class="d-flex align-center pb-2" style="width: 100%;">
                             <MudText Typo="Typo.subtitle2">Всего писем: @CurrentHeaders.Count()</MudText>
-                            <MudTextField @bind-Value="_searchText"
+
+                            <MudTextField @bind-Value="SearchText"
                                           Placeholder="Поиск..."
                                           Variant="Variant.Outlined"
                                           Margin="Margin.Dense"
@@ -43,10 +44,10 @@
                                           Style="max-width: 300px; margin-left: auto;"/>
                         </div>
 
-                        <MudTable Items="CurrentHeaders"
-                                  Virtualize="true"
+                        <MudTable @ref="_table"
+                                  ServerData="ServerReload"
                                   FixedHeader="true"
-                                  Height="87vh"
+                                  Height="calc(82vh - 4px)"
                                   Dense="true"
                                   Hover="true"
                                   @bind-SelectedItem="SelectedHeader"
@@ -73,6 +74,10 @@
                                 <MudTd DataLabel="Дата"
                                        style="font-size: 12px; width: 130px">@context.Date.ToString("g")</MudTd>
                             </RowTemplate>
+
+                            <PagerContent>
+                                <MudTablePager PageSizeOptions="PageSizeOptions"/>
+                            </PagerContent>
                         </MudTable>
                     </MudPaper>
                 </RadzenSplitterPane>
@@ -106,6 +111,8 @@ else
 @code {
     [Parameter] public string User { get; set; } = string.Empty;
 
+    private MudTable<EmailHeader>? _table;
+
     private List<EmailHeader> _allHeaders = [];
     private string _searchText = string.Empty;
     private bool _isMessageLoading;
@@ -113,6 +120,19 @@ else
     private bool IsLoading => _isMessageLoading || _isSwitchingMailbox;
     private EmailMessage? _selectedMessage;
     private EmailHeader? _selectedHeader;
+
+    private int[] PageSizeOptions { get; set; } = [50, 100, 300, 500];
+    
+    private string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (_searchText == value) return;
+            _searchText = value;
+            _table?.ReloadServerData();
+        }
+    }
 
     public EmailHeader? SelectedHeader
     {
@@ -165,9 +185,8 @@ else
         {
             _selectedMessage = await loadingTask;
         }
-        else 
+        else
         {
-
             _isMessageLoading = true;
             await InvokeAsync(StateHasChanged);
 
@@ -186,11 +205,33 @@ else
         _isSwitchingMailbox = true;
         SelectedHeader = null;
         _selectedMailbox = mailbox;
+
+        if (_table != null) await _table.ReloadServerData();
         await InvokeAsync(StateHasChanged);
 
         _isSwitchingMailbox = false;
         await InvokeAsync(StateHasChanged);
     }
+
+    private Task<TableData<EmailHeader>> ServerReload(TableState state, CancellationToken token)
+    {
+        var data = CurrentHeaders;
+
+        data = state.SortLabel switch
+        {
+            "Отправитель" => data.OrderByDirection(state.SortDirection, h => h.From),
+            "Тема" => data.OrderByDirection(state.SortDirection, h => h.Subject),
+            _ => data.OrderByDirection(state.SortDirection, h => h.Date)
+        };
+
+        var emailHeaders = data as EmailHeader[] ?? data.ToArray();
+        var totalItems = emailHeaders.Count();
+
+        var pagedData = emailHeaders.Skip(state.Page * state.PageSize).Take(state.PageSize).ToList();
+
+        return Task.FromResult(new TableData<EmailHeader> { TotalItems = totalItems, Items = pagedData });
+    }
+
 
     private IEnumerable<EmailHeader> CurrentHeaders
     {
