@@ -21,33 +21,64 @@ public class EmlArchiveService(EmlParserService parserService)
         }
         catch (UnauthorizedAccessException ex)
         {
-            Debug.WriteLine($"Error accessing directory {rootPath}: {ex.Message}");
+            Debug.WriteLine($"Ошибка доступа к директории {rootPath}: {ex.Message}");
             onProgress?.Invoke(0, 0);
             return [];
         }
+        catch (DirectoryNotFoundException ex)
+        {
+            Debug.WriteLine($"Директория не найдена {rootPath}: {ex.Message}");
+            onProgress?.Invoke(0, 0);
+            return [];
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Произошла непредвиденная ошибка при чтении директории {rootPath}: {ex.Message}");
+            onProgress?.Invoke(0, 0);
+            return [];
+        }
+
 
         var totalFiles = allFiles.Count;
         var processedFiles = 0;
 
         onProgress?.Invoke(processedFiles, totalFiles);
 
-        await Parallel.ForEachAsync(allFiles, cancellationToken, async (filePath, token) =>
+        var parallelOptions = new ParallelOptions
         {
-            try
+            CancellationToken = cancellationToken
+        };
+
+        try
+        {
+            await Parallel.ForEachAsync(allFiles, parallelOptions, async (filePath, token) =>
             {
-                var message = await parserService.ParseAsync(filePath, userEmail);
-                messages.Add(message);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Ошибка парсинга файла {filePath}: {ex.Message}");
-            }
-            finally
-            {
-                Interlocked.Increment(ref processedFiles);
-                onProgress?.Invoke(processedFiles, totalFiles);
-            }
-        });
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    var message = await parserService.ParseAsync(filePath, userEmail);
+                    messages.Add(message);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Ошибка обработки файла {filePath}: {ex.Message}");
+                }
+                finally
+                {
+                    Interlocked.Increment(ref processedFiles);
+                    onProgress?.Invoke(processedFiles, totalFiles);
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            Debug.WriteLine("Операция сканирования была отменена.");
+        }
 
         return messages.ToList();
     }
