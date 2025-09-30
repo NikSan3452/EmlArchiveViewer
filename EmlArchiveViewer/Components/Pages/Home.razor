@@ -91,6 +91,7 @@
             if (!messages.Any())
             {
                 Snackbar.Add("В указанной директории не найдено .eml файлов.", Severity.Warning);
+                _isLoading = false;
                 return;
             }
 
@@ -98,19 +99,17 @@
             ViewerStateService.UserEmail = _userEmail;
 
             var userName = _userEmail.Split('@').FirstOrDefault() ?? "default";
-
+            
             NavigationManager.NavigateTo($"/{userName}/emails");
         }
         catch (DirectoryNotFoundException)
         {
             Snackbar.Add("Ошибка: Указанная директория не найдена.", Severity.Error);
+            _isLoading = false;
         }
         catch (Exception ex)
         {
             Snackbar.Add($"Произошла непредвиденная ошибка: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
             _isLoading = false;
         }
     }
