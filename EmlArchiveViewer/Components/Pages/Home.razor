@@ -18,7 +18,9 @@
                           Label="Путь к архиву"
                           Variant="Variant.Outlined"
                           Margin="Margin.Dense"
-                          Required="true"/>
+                          Required="true"
+                          @onkeyup="HandleKeyPress"/>
+
             @if (_isLoading)
             {
                 <MudProgressLinear Color="Color.Primary" Value="_progressValue" Class="my-2"/>
@@ -50,6 +52,17 @@
         {
             _archivePath = await LocalStorage.GetItemAsync<string>("archivePath") ?? "D:\\Downloads";
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task HandleKeyPress(KeyboardEventArgs e)
+    {
+        if (e.Code is "Enter" or "NumpadEnter")
+        {
+            if (!string.IsNullOrWhiteSpace(_archivePath) && !_isLoading)
+            {
+                await LoadArchiveAsync();
+            }
         }
     }
 
@@ -110,6 +123,7 @@
             ViewerStateService.UserEmail = detectedUserEmail;
 
             var userName = detectedUserEmail.Split('@').FirstOrDefault() ?? "default";
+
             NavigationManager.NavigateTo($"/{userName}/emails");
         }
         catch (DirectoryNotFoundException)
