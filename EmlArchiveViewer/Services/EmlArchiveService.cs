@@ -6,13 +6,13 @@ namespace EmlArchiveViewer.Services;
 
 public class EmlArchiveService(EmlParserService parserService)
 {
-    public async Task<List<EmailMessage>> ScanDirectoryAndGetMessagesAsync(
+    public async Task<List<EmailHeader>> ScanDirectoryAndGetHeadersAsync(
         string rootPath,
         string userEmail,
         Action<int, int> onProgress,
         CancellationToken cancellationToken = default)
     {
-        var messages = new ConcurrentBag<EmailMessage>();
+        var headers = new ConcurrentBag<EmailHeader>();
         List<string> allFiles;
 
         try
@@ -38,7 +38,6 @@ public class EmlArchiveService(EmlParserService parserService)
             return [];
         }
 
-
         var totalFiles = allFiles.Count;
         var processedFiles = 0;
 
@@ -57,8 +56,8 @@ public class EmlArchiveService(EmlParserService parserService)
                 {
                     token.ThrowIfCancellationRequested();
 
-                    var message = await parserService.ParseAsync(filePath, userEmail);
-                    messages.Add(message);
+                    var header = await parserService.ParseHeadersAsync(filePath, userEmail);
+                    headers.Add(header);
                 }
                 catch (OperationCanceledException)
                 {
@@ -80,6 +79,6 @@ public class EmlArchiveService(EmlParserService parserService)
             Debug.WriteLine("Операция сканирования была отменена.");
         }
 
-        return messages.ToList();
+        return headers.ToList();
     }
 }

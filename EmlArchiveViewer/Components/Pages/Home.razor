@@ -76,11 +76,11 @@
             await LocalStorage.SetItemAsync("userEmail", _userEmail);
             await LocalStorage.SetItemAsync("archivePath", _archivePath);
 
-            var messages = new List<EmailMessage>();
+            var headers = new List<EmailHeader>();
 
             await Task.Run(async () =>
             {
-                messages = await ArchiveService.ScanDirectoryAndGetMessagesAsync(_archivePath, _userEmail, (processed, total) =>
+                headers = await ArchiveService.ScanDirectoryAndGetHeadersAsync(_archivePath, _userEmail, (processed, total) =>
                 {
                     _progressValue = total > 0 ? (double)processed / total * 100 : 0;
                     _progressStatus = $"Обработано файлов: {processed} из {total}";
@@ -88,18 +88,18 @@
                 });
             });
 
-            if (!messages.Any())
+            if (!headers.Any())
             {
                 Snackbar.Add("В указанной директории не найдено .eml файлов.", Severity.Warning);
                 _isLoading = false;
                 return;
             }
 
-            ViewerStateService.AllMessages = messages;
+            ViewerStateService.AllHeaders = headers;
             ViewerStateService.UserEmail = _userEmail;
 
             var userName = _userEmail.Split('@').FirstOrDefault() ?? "default";
-            
+
             NavigationManager.NavigateTo($"/{userName}/emails");
         }
         catch (DirectoryNotFoundException)

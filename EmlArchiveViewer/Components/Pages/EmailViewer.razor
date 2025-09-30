@@ -2,26 +2,27 @@
 @using SortDirection = MudBlazor.SortDirection
 @using Variant = MudBlazor.Variant
 @inject ViewerStateService ViewerStateService
+@inject EmlParserService EmlParserService
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
 
 <PageTitle>Письма - @User</PageTitle>
 
-@if (_allMessages.Any())
+@if (_allHeaders.Any())
 {
     <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="pa-4">
         <MudPaper Elevation="5" style="position: relative; height: 95vh;">
-            
+
             <MudOverlay Visible="@IsLoading" DarkBackground="true" Absolute="true" Style="border-radius: inherit;">
-                <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+                <MudProgressCircular Color="Color.Primary" Indeterminate="true"/>
             </MudOverlay>
 
             <RadzenSplitter style="height: 100%;">
                 <RadzenSplitterPane Size="10%" Min="150px">
                     <MudPaper Elevation="0" Class="pa-2" Style="height: 100%; padding: 10px">
                         <MudList @bind-SelectedValue="SelectedMailbox">
-                            <MudListItem Value="@MailboxType.Inbox" Text="Входящие" />
-                            <MudListItem Value="@MailboxType.Sent" Text="Исходящие" />
+                            <MudListItem Value="@MailboxType.Inbox" Text="Входящие"/>
+                            <MudListItem Value="@MailboxType.Sent" Text="Исходящие"/>
                         </MudList>
                     </MudPaper>
                 </RadzenSplitterPane>
@@ -29,7 +30,7 @@
                 <RadzenSplitterPane Size="40%" Min="300px">
                     <MudPaper Elevation="0" Style="height: 100%; padding: 10px; box-sizing: border-box;">
                         <div class="d-flex align-center pb-2" style="width: 100%;">
-                            <MudText Typo="Typo.subtitle2">Всего писем: @CurrentMessages.Count()</MudText>
+                            <MudText Typo="Typo.subtitle2">Всего писем: @CurrentHeaders.Count()</MudText>
                             <MudTextField @bind-Value="_searchText"
                                           Placeholder="Поиск..."
                                           Variant="Variant.Outlined"
@@ -37,28 +38,33 @@
                                           Adornment="Adornment.Start"
                                           AdornmentIcon="@Icons.Material.Filled.Search"
                                           IconSize="Size.Small"
-                                          Immediate="true"
+                                          DebounceInterval="100"
                                           Clearable="true"
-                                          Style="max-width: 300px; margin-left: auto;" />
+                                          Style="max-width: 300px; margin-left: auto;"/>
                         </div>
 
-                        <MudTable Items="CurrentMessages"
+                        <MudTable Items="CurrentHeaders"
+                                  Virtualize="true"
                                   FixedHeader="true"
                                   Height="87vh"
                                   Dense="true"
                                   Hover="true"
-                                  @bind-SelectedItem="SelectedMessage"
+                                  @bind-SelectedItem="SelectedHeader"
                                   Breakpoint="Breakpoint.None"
                                   Style="cursor: pointer;">
                             <HeaderContent>
                                 <MudTh>
-                                    <MudTableSortLabel SortBy="new Func<EmailMessage, object>(x => x.From)">Отправитель</MudTableSortLabel>
+                                    <MudTableSortLabel SortBy="new Func<EmailHeader, object>(x => x.From)">Отправитель
+                                    </MudTableSortLabel>
                                 </MudTh>
                                 <MudTh>
-                                    <MudTableSortLabel SortBy="new Func<EmailMessage, object>(x => x.Subject)">Тема</MudTableSortLabel>
+                                    <MudTableSortLabel SortBy="new Func<EmailHeader, object>(x => x.Subject)">Тема
+                                    </MudTableSortLabel>
                                 </MudTh>
                                 <MudTh>
-                                    <MudTableSortLabel InitialDirection="SortDirection.Descending" SortBy="new Func<EmailMessage, object>(x => x.Date)">Дата</MudTableSortLabel>
+                                    <MudTableSortLabel InitialDirection="SortDirection.Descending"
+                                                       SortBy="new Func<EmailHeader, object>(x => x.Date)">Дата
+                                    </MudTableSortLabel>
                                 </MudTh>
                             </HeaderContent>
                             <RowTemplate>
@@ -71,12 +77,13 @@
                 </RadzenSplitterPane>
 
                 <RadzenSplitterPane Size="50%" Min="300px">
-                    <MudPaper Elevation="0" Style="height: 100%; overflow-y: auto; padding: 10px; box-sizing: border-box;">
+                    <MudPaper Elevation="0"
+                              Style="height: 100%; overflow-y: auto; padding: 10px; box-sizing: border-box;">
                         @if (_selectedMessage != null)
                         {
                             <MailView Message="_selectedMessage"
                                       OnDownloadAttachment="DownloadAttachment"
-                                      style="height: 100%;" />
+                                      style="height: 100%;"/>
                         }
                         else
                         {
@@ -90,28 +97,35 @@
 }
 else
 {
-    <MudText Align="Align.Center" Class="mt-16">Нет данных для отображения.<MudLink Href="/">Вернуться на главную</MudLink>
+    <MudText Align="Align.Center" Class="mt-16">Нет данных для отображения.
+        <MudLink Href="/">Вернуться на главную</MudLink>
     </MudText>
 }
 
 @code {
     [Parameter] public string User { get; set; } = string.Empty;
 
-    private List<EmailMessage> _allMessages = [];
+    private List<EmailHeader> _allHeaders = [];
     private string _searchText = string.Empty;
-    
     private bool _isMessageLoading;
     private bool _isSwitchingMailbox;
     private bool IsLoading => _isMessageLoading || _isSwitchingMailbox;
-
     private EmailMessage? _selectedMessage;
-    public EmailMessage? SelectedMessage
+    private EmailHeader? _selectedHeader;
+
+    public EmailHeader? SelectedHeader
     {
-        get => _selectedMessage;
-        set => _ = SetSelectedMessageAsync(value);
+        get => _selectedHeader;
+        set
+        {
+            if (_selectedHeader == value) return;
+            _selectedHeader = value;
+            _ = LoadFullMessageAsync(value);
+        }
     }
 
     private MailboxType _selectedMailbox = MailboxType.Inbox;
+
     public MailboxType SelectedMailbox
     {
         get => _selectedMailbox;
@@ -120,21 +134,28 @@ else
 
     protected override void OnInitialized()
     {
-        _allMessages = ViewerStateService.AllMessages;
-        if (!_allMessages.Any())
+        _allHeaders = ViewerStateService.AllHeaders;
+        if (!_allHeaders.Any())
         {
             NavigationManager.NavigateTo("/");
         }
     }
 
-    private async Task SetSelectedMessageAsync(EmailMessage? message)
+    private async Task LoadFullMessageAsync(EmailHeader? header)
     {
-        if (_selectedMessage == message) return;
+        if (header == null)
+        {
+            _selectedMessage = null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
 
         _isMessageLoading = true;
-        _selectedMessage = message;
+        _selectedMessage = null;
         await InvokeAsync(StateHasChanged);
-        
+
+        _selectedMessage = await EmlParserService.ParseFullMessageAsync(header.FilePath, ViewerStateService.UserEmail);
+
         _isMessageLoading = false;
         await InvokeAsync(StateHasChanged);
     }
@@ -144,21 +165,42 @@ else
         if (_selectedMailbox == mailbox) return;
 
         _isSwitchingMailbox = true;
-        _selectedMessage = null;
+        SelectedHeader = null;
         _selectedMailbox = mailbox;
         await InvokeAsync(StateHasChanged);
-        
+
         _isSwitchingMailbox = false;
         await InvokeAsync(StateHasChanged);
     }
-    
-    private IEnumerable<EmailMessage> CurrentMessages
+
+    private IEnumerable<EmailHeader> CurrentHeaders
     {
         get
         {
-            return _allMessages
-                .Where(m => m.Mailbox == _selectedMailbox)
-                .Where(Filter(_searchText));
+            var headersByMailbox = _allHeaders.Where(h => h.Mailbox == _selectedMailbox);
+
+            if (string.IsNullOrWhiteSpace(_searchText))
+            {
+                return headersByMailbox;
+            }
+
+            var normalizedSearch = NormalizeCyrillic(_searchText.Trim());
+            var searchTerms = normalizedSearch?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (searchTerms == null || searchTerms.Length == 0)
+            {
+                return headersByMailbox;
+            }
+
+            return headersByMailbox.Where(header =>
+            {
+                return searchTerms.All(term =>
+                    (NormalizeCyrillic(header.From)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (NormalizeCyrillic(header.To)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (NormalizeCyrillic(header.Subject)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    header.Date.ToString("dd.MM.yyyy HH:mm").Contains(term, StringComparison.OrdinalIgnoreCase)
+                );
+            });
         }
     }
 
@@ -176,27 +218,4 @@ else
             : input.Replace("ё", "е").Replace("Ё", "Е").Replace("й", "и").Replace("Й", "И");
     }
 
-    private static Func<EmailMessage, bool> Filter(string? searchString)
-    {
-        return message =>
-        {
-            if (string.IsNullOrWhiteSpace(searchString))
-                return true;
-
-            var normalizedSearch = NormalizeCyrillic(searchString.Trim());
-            var searchTerms = normalizedSearch?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-            if (searchTerms == null || searchTerms.Length == 0)
-                return true;
-
-            return searchTerms.All(term =>
-                (NormalizeCyrillic(message.From)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (NormalizeCyrillic(message.To)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (NormalizeCyrillic(message.Subject)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (NormalizeCyrillic(message.TextBody)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (NormalizeCyrillic(message.HtmlBody)?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (NormalizeCyrillic(message.Date.ToString("dd.MM.yyyy HH:mm"))?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
-            );
-        };
-    }
 }

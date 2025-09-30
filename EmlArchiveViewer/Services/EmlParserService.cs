@@ -6,7 +6,30 @@ namespace EmlArchiveViewer.Services;
 
 public class EmlParserService
 {
-    public async Task<EmailMessage> ParseAsync(string filePath, string userEmail)
+    public async Task<EmailHeader> ParseHeadersAsync(string filePath, string userEmail)
+    {
+        await using var stream = File.OpenRead(filePath);
+
+        var message = await MimeMessage.LoadAsync(ParserOptions.Default, stream, true);
+
+        var fromAddress = message.From.Mailboxes.FirstOrDefault()?.Address;
+        var mailboxType = MailboxType.Inbox;
+        if (!string.IsNullOrEmpty(userEmail) && !string.IsNullOrEmpty(fromAddress) &&
+            fromAddress.Equals(userEmail, StringComparison.OrdinalIgnoreCase))
+            mailboxType = MailboxType.Sent;
+
+        return new EmailHeader
+        {
+            FilePath = filePath,
+            From = message.From.ToString(),
+            To = message.To.ToString(),
+            Subject = message.Subject ?? string.Empty,
+            Date = message.Date,
+            Mailbox = mailboxType
+        };
+    }
+
+    public async Task<EmailMessage> ParseFullMessageAsync(string filePath, string userEmail)
     {
         var options = new ParserOptions
         {
