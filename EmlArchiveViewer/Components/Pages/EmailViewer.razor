@@ -68,9 +68,10 @@
                                 </MudTh>
                             </HeaderContent>
                             <RowTemplate>
-                                <MudTd DataLabel="Отправитель">@context.From</MudTd>
-                                <MudTd DataLabel="Тема">@context.Subject</MudTd>
-                                <MudTd DataLabel="Дата">@context.Date.ToString("g")</MudTd>
+                                <MudTd DataLabel="Отправитель" style="font-size: 12px;">@context.From</MudTd>
+                                <MudTd DataLabel="Тема" style="font-size: 12px;">@context.Subject</MudTd>
+                                <MudTd DataLabel="Дата"
+                                       style="font-size: 12px; width: 130px">@context.Date.ToString("g")</MudTd>
                             </RowTemplate>
                         </MudTable>
                     </MudPaper>
@@ -150,13 +151,31 @@ else
             return;
         }
 
-        _isMessageLoading = true;
+        _isMessageLoading = false;
         _selectedMessage = null;
         await InvokeAsync(StateHasChanged);
 
-        _selectedMessage = await EmlParserService.ParseFullMessageAsync(header.FilePath, ViewerStateService.UserEmail);
+        var loadingTask = EmlParserService.ParseFullMessageAsync(header.FilePath, ViewerStateService.UserEmail);
 
-        _isMessageLoading = false;
+        var delayTask = Task.Delay(1000);
+
+        var completedTask = await Task.WhenAny(loadingTask, delayTask);
+
+        if (completedTask == loadingTask)
+        {
+            _selectedMessage = await loadingTask;
+        }
+        else 
+        {
+
+            _isMessageLoading = true;
+            await InvokeAsync(StateHasChanged);
+
+            _selectedMessage = await loadingTask;
+
+            _isMessageLoading = false;
+        }
+
         await InvokeAsync(StateHasChanged);
     }
 
