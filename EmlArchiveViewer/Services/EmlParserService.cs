@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using EmlArchiveViewer.Models;
 using MimeKit;
 
@@ -9,14 +10,10 @@ public class EmlParserService
     public async Task<EmailHeader> ParseHeadersAsync(string filePath, string userEmail)
     {
         await using var stream = File.OpenRead(filePath);
-
         var message = await MimeMessage.LoadAsync(ParserOptions.Default, stream, true);
 
         var fromAddress = message.From.Mailboxes.FirstOrDefault()?.Address;
-        var mailboxType = MailboxType.Inbox;
-        if (!string.IsNullOrEmpty(userEmail) && !string.IsNullOrEmpty(fromAddress) &&
-            fromAddress.Equals(userEmail, StringComparison.OrdinalIgnoreCase))
-            mailboxType = MailboxType.Sent;
+        var mailboxType = ResolveMailboxType(userEmail, fromAddress);
 
         return new EmailHeader
         {
@@ -31,20 +28,42 @@ public class EmlParserService
 
     public async Task<EmailMessage> ParseFullMessageAsync(string filePath, string userEmail)
     {
+        var message = await LoadMessageAsync(filePath);
+
+        var fromAddress = message.From.Mailboxes.FirstOrDefault()?.Address;
+        var mailboxType = ResolveMailboxType(userEmail, fromAddress);
+
+        var emailMessage = InitializeEmailMessage(filePath, message, mailboxType);
+
+        await ProcessBodyPartsAsync(message, emailMessage);
+
+        emailMessage.HasAttachments = emailMessage.Attachments.Count != 0;
+
+        return emailMessage;
+    }
+
+    private static async Task<MimeMessage> LoadMessageAsync(string filePath)
+    {
         var options = new ParserOptions
         {
             CharsetEncoding = Encoding.GetEncoding("windows-1251")
         };
+        return await MimeMessage.LoadAsync(options, filePath);
+    }
 
-        var message = await MimeMessage.LoadAsync(options, filePath);
-
-        var fromAddress = message.From.Mailboxes.FirstOrDefault()?.Address;
-        var mailboxType = MailboxType.Inbox;
-        if (!string.IsNullOrEmpty(userEmail) && !string.IsNullOrEmpty(fromAddress) &&
+    private static MailboxType ResolveMailboxType(string userEmail, string? fromAddress)
+    {
+        if (!string.IsNullOrEmpty(userEmail) &&
+            !string.IsNullOrEmpty(fromAddress) &&
             fromAddress.Equals(userEmail, StringComparison.OrdinalIgnoreCase))
-            mailboxType = MailboxType.Sent;
+            return MailboxType.Sent;
 
-        var emailMessage = new EmailMessage
+        return MailboxType.Inbox;
+    }
+
+    private static EmailMessage InitializeEmailMessage(string filePath, MimeMessage message, MailboxType mailboxType)
+    {
+        return new EmailMessage
         {
             FilePath = filePath,
             From = message.From.ToString(),
@@ -58,45 +77,58 @@ public class EmlParserService
             Attachments = [],
             Mailbox = mailboxType
         };
+    }
 
-        foreach (var attachment in message.Attachments)
+    private static async Task ProcessBodyPartsAsync(MimeMessage message, EmailMessage emailMessage)
+    {
+        foreach (var part in message.BodyParts.OfType<MimePart>())
         {
+            var mimeType = part.ContentType.MimeType.ToLowerInvariant();
+
+            if (mimeType.StartsWith("text/plain") || mimeType.StartsWith("text/html"))
+                continue;
+
             using var memoryStream = new MemoryStream();
-            if (attachment is not MimePart mimePart) continue;
+            await part.Content.DecodeToAsync(memoryStream);
 
-            await mimePart.Content.DecodeToAsync(memoryStream);
-            emailMessage.Attachments.Add(new EmailAttachment
+            var contentId = part.ContentId?.Trim('<', '>');
+            var isInline = !string.IsNullOrEmpty(contentId) ||
+                           part.ContentDisposition?.Disposition.Equals("inline", StringComparison.OrdinalIgnoreCase) ==
+                           true;
+
+            if (isInline)
             {
-                FileName = mimePart.FileName,
-                Content = memoryStream.ToArray(),
-                ContentType = mimePart.ContentType.MimeType,
-                IsInline = attachment.IsAttachment,
-                ContentId = mimePart.ContentId
-            });
-        }
-
-        emailMessage.HasAttachments = emailMessage.Attachments.Count != 0;
-
-        if (string.IsNullOrEmpty(emailMessage.HtmlBody) || message.Body is not Multipart multipart ||
-            !multipart.Any(p =>
-            {
-                var part = p as MimePart;
-                return part != null && !string.IsNullOrEmpty(part.ContentId);
-            }))
-            return emailMessage;
-        {
-            foreach (var part in multipart.OfType<MimePart>().Where(p => !string.IsNullOrEmpty(p.ContentId)))
-            {
-                var contentId = part.ContentId;
-                using var stream = new MemoryStream();
-
-                await part.Content.DecodeToAsync(stream);
-                var base64 = Convert.ToBase64String(stream.ToArray());
-                emailMessage.HtmlBody = emailMessage.HtmlBody.Replace($"cid:{contentId}",
-                    $"data:{part.ContentType.MimeType};base64,{base64}");
+                EmbedInlineImage(emailMessage, part, contentId, memoryStream.ToArray());
+                continue;
             }
-        }
 
-        return emailMessage;
+            AddAttachment(emailMessage, part, contentId, memoryStream.ToArray());
+        }
+    }
+
+    private static void EmbedInlineImage(EmailMessage emailMessage, MimePart part, string? contentId, byte[] content)
+    {
+        if (string.IsNullOrEmpty(emailMessage.HtmlBody) || string.IsNullOrEmpty(contentId))
+            return;
+
+        var base64 = Convert.ToBase64String(content);
+
+        emailMessage.HtmlBody = Regex.Replace(
+            emailMessage.HtmlBody,
+            $"cid:{Regex.Escape(contentId)}",
+            $"data:{part.ContentType.MimeType};base64,{base64}",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static void AddAttachment(EmailMessage emailMessage, MimePart part, string? contentId, byte[] content)
+    {
+        emailMessage.Attachments.Add(new EmailAttachment
+        {
+            FileName = part.FileName,
+            Content = content,
+            ContentType = part.ContentType.MimeType,
+            IsInline = false,
+            ContentId = contentId
+        });
     }
 }
