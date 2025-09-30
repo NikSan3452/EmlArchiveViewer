@@ -121,13 +121,14 @@ public class EmlParserService
 
     private static void AddAttachment(EmailMessage emailMessage, MimePart part, string? contentId, byte[] content)
     {
-        emailMessage.Attachments.Add(new EmailAttachment
-        {
-            FileName = part.FileName,
-            Content = content,
-            ContentType = part.ContentType.MimeType,
-            IsInline = false,
-            ContentId = contentId
-        });
+        if (contentId != null)
+            emailMessage.Attachments.Add(new EmailAttachment
+            {
+                FileName = part.FileName,
+                Content = content,
+                ContentType = part.ContentType.MimeType,
+                IsInline = false,
+                ContentId = contentId
+            });
     }
 }
